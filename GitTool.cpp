@@ -47,13 +47,9 @@ void throwOnGitError(int error, const std::string& message)
     }
 }
 
-git_repository* init_repo()
+git_repository* init_repo(const boost::filesystem::path& repoPath)
 {
     int error;
-
-    boost::filesystem::path repoPath = boost::filesystem::current_path();
-    repoPath /= "tempgit";
-    boost::filesystem::create_directories(repoPath);
 
     git_repository *repo = NULL;
     error = git_repository_init(&repo, repoPath.string().c_str(), 0);
@@ -65,13 +61,9 @@ git_repository* init_repo()
     return repo;
 }
 
-git_repository* open_repo()
+git_repository* open_repo(const boost::filesystem::path& repoPath)
 {
     int error;
-
-    boost::filesystem::path repoPath = boost::filesystem::current_path();
-    repoPath /= "tempgit";
-    boost::filesystem::create_directories(repoPath);
 
     git_repository *repo = NULL;
     error = git_repository_open(&repo, repoPath.string().c_str());
@@ -83,9 +75,7 @@ git_repository* open_repo()
     return repo;
 }
 
-
-
-static git_oid create_initial_commit(git_repository *repo)
+static git_oid create_initial_commit(git_repository* repo)
 {
     int error;
 
@@ -127,7 +117,42 @@ static git_oid create_initial_commit(git_repository *repo)
     return commit_id;
 }
 
-void findAllOnMaster(git_repository *repo)
+int print_cb(
+    const git_diff_delta *delta, /**< delta that contains this data */
+    const git_diff_hunk *hunk,   /**< hunk containing this data */
+    const git_diff_line *line,   /**< line data */
+    void *payload)              /**< user reference data */
+{
+    std::string sline(line->content, line->content + line->content_len);
+    std::cout << sline << std::endl;
+
+    return 0;
+}
+
+void dumpDiff(git_repository* repo, git_commit *commit0, git_commit *commit1)
+{
+    int error;
+
+    git_tree *commit0_tree = NULL;
+    error = git_commit_tree(&commit0_tree, commit0);
+    throwOnGitError(error, "Could not create commit0 tree.");
+    BOOST_SCOPE_EXIT_ALL(=) { git_tree_free(commit0_tree); };
+
+    git_tree *commit1_tree = NULL;
+    error = git_commit_tree(&commit1_tree, commit1);
+    throwOnGitError(error, "Could not create commit1 tree.");
+    BOOST_SCOPE_EXIT_ALL(=) { git_tree_free(commit1_tree); };
+
+    git_diff *diff = NULL;
+    error = git_diff_tree_to_tree(&diff, repo, commit0_tree, commit1_tree, NULL);
+    throwOnGitError(error, "Could not create diff.");
+    BOOST_SCOPE_EXIT_ALL(= ) { git_diff_free(diff); };
+
+    error = git_diff_print(diff, GIT_DIFF_FORMAT_PATCH, print_cb, NULL);
+    throwOnGitError(error, "Could not print diff.");
+}
+
+void findAllOnMaster(git_repository* repo)
 {
     int error;
 
@@ -165,6 +190,8 @@ void findAllOnMaster(git_repository *repo)
         throwOnGitError(error, "Parent commit lookup failed.");
         BOOST_SCOPE_EXIT_ALL(&) { git_commit_free(parentCommit); };
 
+        dumpDiff(repo, parentCommit, commit);
+
         std::swap(commit, parentCommit);
     }
 
@@ -188,8 +215,12 @@ int main()
         throwOnGitError(error, "Git initialization failed.");
         BOOST_SCOPE_EXIT_ALL(=) { int error = git_libgit2_shutdown(); logOnGitError(error, "Git shutdown failed."); };
 
-        //git_repository* repo = init_repo();
-        git_repository* repo = open_repo();
+        boost::filesystem::path repoPath = boost::filesystem::current_path();
+        repoPath /= "../GitToolPlayground";
+        boost::filesystem::create_directories(repoPath);
+
+        //git_repository* repo = init_repo(repoPath);
+        git_repository* repo = open_repo(repoPath);
         BOOST_SCOPE_EXIT_ALL(=) { git_repository_free(repo); };
 
         //create_initial_commit(repo);
